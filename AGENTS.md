@@ -25,4 +25,4 @@ Code behind `#[cfg(windows)]` doesn't compile on a Mac, so CI is its only check.
 
 - Make the smallest change that solves the task, in the style of the code around it.
 - Prefer the standard library, a Tauri API, or a dependency we already have before adding a new crate or npm package.
-- Logic that has branches gets a unit test, written as a Rust `#[test]` beside the code.
+- Logic that has branches gets a unit test: a Rust `#[test]` beside the code, or a `src/*.test.ts` file run by `node --test`.
