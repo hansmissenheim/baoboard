@@ -2,11 +2,15 @@ mod clipboard;
 #[cfg(target_os = "macos")]
 mod mac;
 mod popup;
+mod settings;
 mod stickers;
 #[cfg(windows)]
 mod win;
 
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::Mutex,
+};
 
 use tauri::{
     AppHandle, Manager, State,
@@ -16,18 +20,25 @@ use tauri::{
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
+use settings::Settings;
+
 struct Dirs {
     stickers: PathBuf,
     cache: PathBuf,
+    settings: PathBuf,
 }
 
-/// Longest side of a pasted sticker, in pixels.
-const SIZE: u32 = 240;
-
-#[cfg(target_os = "macos")]
-const SHORTCUT: (&str, &str) = ("Control+Super+KeyB", "⌃⌘B");
-#[cfg(not(target_os = "macos"))]
-const SHORTCUT: (&str, &str) = ("Control+Alt+KeyB", "Ctrl+Alt+B");
+fn register_shortcut(
+    app: &AppHandle,
+    shortcut: &str,
+) -> Result<(), tauri_plugin_global_shortcut::Error> {
+    app.global_shortcut()
+        .on_shortcut(shortcut, |app, _, event| {
+            if event.state == ShortcutState::Pressed {
+                let _ = popup::toggle(app, false);
+            }
+        })
+}
 
 fn save_all(dir: &Path, files: Vec<stickers::Result<Vec<u8>>>) -> Result<(), String> {
     let errors: Vec<String> = files
@@ -75,9 +86,15 @@ fn delete_sticker(dirs: State<Dirs>, id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn send_sticker(app: AppHandle, dirs: State<'_, Dirs>, id: String) -> Result<(), String> {
+async fn send_sticker(
+    app: AppHandle,
+    dirs: State<'_, Dirs>,
+    settings: State<'_, Mutex<Settings>>,
+    id: String,
+) -> Result<(), String> {
+    let size = settings.lock().unwrap().size;
     let copy = || {
-        let path = stickers::render(&stickers::find(&dirs.stickers, &id)?, &dirs.cache, SIZE)?;
+        let path = stickers::render(&stickers::find(&dirs.stickers, &id)?, &dirs.cache, size)?;
         clipboard::copy(&path)
     };
     copy().map_err(|e| e.to_string())?;
@@ -89,10 +106,78 @@ fn dismiss(app: AppHandle) -> Result<(), String> {
     popup::dismiss(&app).map_err(|e| e.to_string())
 }
 
+#[derive(serde::Serialize)]
+struct SettingsView {
+    size: u32,
+    shortcut: String,
+    label: String,
+}
+
+impl From<&Settings> for SettingsView {
+    fn from(s: &Settings) -> Self {
+        Self {
+            size: s.size,
+            shortcut: s.shortcut.clone(),
+            label: settings::label(&s.shortcut, cfg!(target_os = "macos")),
+        }
+    }
+}
+
+#[tauri::command]
+fn get_settings(settings: State<Mutex<Settings>>) -> SettingsView {
+    (&*settings.lock().unwrap()).into()
+}
+
+#[tauri::command]
+fn set_size(
+    dirs: State<Dirs>,
+    settings: State<Mutex<Settings>>,
+    size: u32,
+) -> Result<SettingsView, String> {
+    if !settings::SIZES.contains(&size) {
+        return Err(format!(
+            "Size must be {} to {} px",
+            settings::SIZES.start(),
+            settings::SIZES.end()
+        ));
+    }
+    let mut s = settings.lock().unwrap();
+    let old = std::mem::replace(&mut s.size, size);
+    settings::save(&dirs.settings, &s).map_err(|e| e.to_string())?;
+    if old != size {
+        // Renders at the old size are never read again.
+        let _ = std::fs::remove_dir_all(dirs.cache.join(old.to_string()));
+    }
+    Ok((&*s).into())
+}
+
+/// Async so the plugin's hop to the main thread never waits on itself.
+#[tauri::command]
+async fn set_shortcut(
+    app: AppHandle,
+    dirs: State<'_, Dirs>,
+    settings: State<'_, Mutex<Settings>>,
+    shortcut: String,
+) -> Result<SettingsView, String> {
+    // Never hold the lock across registration: it waits on the main thread,
+    // which may be waiting on the lock.
+    let old = settings.lock().unwrap().shortcut.clone();
+    if shortcut != old {
+        // Register first, so a shortcut another app owns leaves the old one working.
+        register_shortcut(&app, &shortcut).map_err(|e| {
+            let label = settings::label(&shortcut, cfg!(target_os = "macos"));
+            format!("{label} is not available: {e}")
+        })?;
+        let _ = app.global_shortcut().unregister(old.as_str());
+    }
+    let mut s = settings.lock().unwrap();
+    s.shortcut = shortcut;
+    settings::save(&dirs.settings, &s).map_err(|e| e.to_string())?;
+    Ok((&*s).into())
+}
+
 fn tray(app: &tauri::App) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Open BaoBoard", true, None::<&str>)?;
-    let hint = format!("Paste a sticker: {}", SHORTCUT.1);
-    let hint = MenuItem::with_id(app, "hint", hint, false, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit BaoBoard", true, None::<&str>)?;
     // macOS wants a monochrome template image in the menu bar; Windows shows
     // the full-color app icon in the notification area.
@@ -104,7 +189,7 @@ fn tray(app: &tauri::App) -> tauri::Result<()> {
         .icon(icon)
         .icon_as_template(true)
         .tooltip("BaoBoard")
-        .menu(&Menu::with_items(app, &[&open, &hint, &quit])?)
+        .menu(&Menu::with_items(app, &[&open, &quit])?)
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "open" => {
@@ -129,21 +214,25 @@ pub fn run() {
                 mac::request_access();
             }
             tray(app)?;
-            let toggle =
-                |app: &AppHandle, _: &_, event: tauri_plugin_global_shortcut::ShortcutEvent| {
-                    if event.state == ShortcutState::Pressed {
-                        let _ = popup::toggle(app, false);
-                    }
-                };
-            if let Err(e) = app.global_shortcut().on_shortcut(SHORTCUT.0, toggle) {
-                eprintln!("could not register {}: {e}", SHORTCUT.0);
-            }
 
             let stickers = app.path().app_data_dir()?.join("stickers");
             let cache = app.path().app_cache_dir()?;
-            std::fs::create_dir_all(&stickers)?;
-            std::fs::create_dir_all(&cache)?;
-            app.manage(Dirs { stickers, cache });
+            let config = app.path().app_config_dir()?;
+            for dir in [&stickers, &cache, &config] {
+                std::fs::create_dir_all(dir)?;
+            }
+            let settings_path = config.join("settings.json");
+            let settings = settings::load(&settings_path);
+            if let Err(e) = register_shortcut(app.handle(), &settings.shortcut) {
+                // The tray menu still opens the popup.
+                eprintln!("could not register {}: {e}", settings.shortcut);
+            }
+            app.manage(Mutex::new(settings));
+            app.manage(Dirs {
+                stickers,
+                cache,
+                settings: settings_path,
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -154,6 +243,9 @@ pub fn run() {
             delete_sticker,
             send_sticker,
             dismiss,
+            get_settings,
+            set_size,
+            set_shortcut,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
