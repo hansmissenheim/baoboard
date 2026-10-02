@@ -26,10 +26,18 @@ tauri-plugin-global-shortcut = "2"
 enigo = "0.6"
 
 # Decoding and re-encoding GIFs is many times slower unoptimized, which makes
-# `mise run dev` feel broken. Only dependencies are optimized, so our own code
-# still builds fast.
-[profile.dev.package."*"]
-opt-level = 3
+# `mise run dev` feel broken. Only the image pipeline is optimized, so a cold
+# CI build stays quick.
+[profile.dev.package]
+image.opt-level = 3
+gif.opt-level = 3
+color_quant.opt-level = 3
+png.opt-level = 3
+fdeflate.opt-level = 3
+miniz_oxide.opt-level = 3
+zune-jpeg.opt-level = 3
+image-webp.opt-level = 3
+weezl.opt-level = 3
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]
