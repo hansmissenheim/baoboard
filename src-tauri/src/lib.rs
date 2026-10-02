@@ -10,7 +10,6 @@ use std::path::{Path, PathBuf};
 
 use tauri::{
     AppHandle, Manager, State,
-    image::Image,
     ipc::{InvokeBody, Request},
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
@@ -98,7 +97,7 @@ fn tray(app: &tauri::App) -> tauri::Result<()> {
     // macOS wants a monochrome template image in the menu bar; Windows shows
     // the full-color app icon in the notification area.
     #[cfg(target_os = "macos")]
-    let icon = Image::from_bytes(include_bytes!("../icons/tray.png"))?;
+    let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png"))?;
     #[cfg(not(target_os = "macos"))]
     let icon = app.default_window_icon().unwrap().clone();
     TrayIconBuilder::new()
