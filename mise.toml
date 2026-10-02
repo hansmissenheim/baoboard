@@ -1,3 +1,16 @@
 [tools]
 node = "24"
 rust = { version = "1.98", components = "rustfmt,clippy" }
+
+[tasks.check]
+description = "Build, lint and test everything; CI runs exactly this"
+run = [
+  "npm run build",
+  "cargo fmt --manifest-path src-tauri/Cargo.toml --check",
+  "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
+  "cargo test --manifest-path src-tauri/Cargo.toml",
+]
+
+[tasks.dev]
+description = "Run the app with hot reload"
+run = "npm run tauri dev"
