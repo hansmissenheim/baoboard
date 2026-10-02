@@ -19,6 +19,7 @@ Code behind `#[cfg(windows)]` doesn't compile on a Mac, so CI is its only check.
 
 - Tauri is pinned to v2, and v3 is still in alpha. Training data mixes v1 and v2 APIs, so look up current v2 docs before using a Tauri or plugin API.
 - On macOS, the simulated paste and the caret lookup need Accessibility permission. The grant is tied to the binary's signature, or to the terminal app under `mise run dev`, so an unsigned rebuild can silently lose it.
+- On macOS, the popup only takes focus when the shortcut is a real keypress. A synthetic one (from `osascript` or System Events) shows the window but leaves the previous app active.
 - User data lives in the OS app-data dir for `io.github.hansmissenheim.baoboard`. Tests work in temp dirs.
 
 ## Principles
