@@ -1,6 +1,8 @@
 import { convertFileSrc, invoke, type InvokeArgs } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { Menu } from "@tauri-apps/api/menu";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { move } from "./grid.ts";
 
 type Sticker = { id: string; path: string };
@@ -14,8 +16,12 @@ const picker = document.querySelector<HTMLInputElement>("#picker")!;
 
 let stickers: Sticker[] = [];
 // Cell 0 is the add button, so sticker i sits in cell i + 1.
-let selected = 0;
+let selected = 1;
 let pendingDelete: string | null = null;
+// Opened from the tray: stays open when it loses focus, so files can be dropped on it.
+let sticky = false;
+// The file picker steals focus without meaning "close the popup".
+let picking = false;
 
 function say(text = "") {
   status.textContent = text;
@@ -61,7 +67,7 @@ async function refresh() {
   grid.replaceChildren(cell(0, "Add stickers", document.createTextNode("+")), ...stickers.map(stickerCell));
   grid.firstElementChild!.classList.add("add");
   select(Math.min(selected, stickers.length));
-  if (!stickers.length) say(`Drop images here, paste with ${PASTE}, or click +`);
+  if (!stickers.length) say(`Add stickers with ${PASTE} or +`);
 }
 
 function select(i: number) {
@@ -74,12 +80,13 @@ function select(i: number) {
 }
 
 function activate(i: number) {
-  if (i === 0) picker.click();
-  else send(stickers[i - 1].id);
-}
-
-async function send(id: string) {
-  if (await call("send_sticker", { id })) say(`Copied, paste with ${PASTE}`);
+  if (i === 0) {
+    picking = true;
+    picker.click();
+  } else {
+    // The backend hides the popup and pastes into the app underneath.
+    call("send_sticker", { id: stickers[i - 1].id });
+  }
 }
 
 async function remove(id: string) {
@@ -104,6 +111,8 @@ window.addEventListener("keydown", (e) => {
     e.preventDefault();
     select(move(selected, e.key, COLS, stickers.length + 1));
     say();
+  } else if (e.key === "Escape") {
+    invoke("dismiss");
   } else if (e.key === "Enter") {
     e.preventDefault();
     activate(selected);
@@ -118,7 +127,9 @@ window.addEventListener("keydown", (e) => {
   }
 });
 
+picker.addEventListener("cancel", () => (picking = false));
 picker.addEventListener("change", async () => {
+  picking = false;
   for (const file of picker.files ?? []) {
     await importFrom("import_bytes", new Uint8Array(await file.arrayBuffer()));
   }
@@ -128,6 +139,15 @@ picker.addEventListener("change", async () => {
 getCurrentWebview().onDragDropEvent(({ payload }) => {
   document.body.classList.toggle("dropping", payload.type === "enter" || payload.type === "over");
   if (payload.type === "drop") importFrom("import_files", { paths: payload.paths });
+});
+
+listen<boolean>("opened", ({ payload }) => {
+  sticky = payload;
+  say(sticky ? "Drop images here to add them" : "");
+});
+
+getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+  if (!focused && !sticky && !picking) getCurrentWindow().hide();
 });
 
 document.addEventListener("contextmenu", (e) => e.preventDefault());

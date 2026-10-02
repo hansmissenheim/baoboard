@@ -13,9 +13,16 @@
     "withGlobalTauri": false,
     "windows": [
       {
+        "label": "main",
         "title": "BaoBoard",
         "width": 360,
-        "height": 320
+        "height": 320,
+        "visible": false,
+        "decorations": false,
+        "resizable": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visibleOnAllWorkspaces": true
       }
     ],
     "security": {
