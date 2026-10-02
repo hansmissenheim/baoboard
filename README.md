@@ -13,6 +13,13 @@ Stickers are pasted with their longest side at 240 px. Animated images go out as
 
 On macOS, BaoBoard asks for Accessibility access on first launch. It needs this to find the text cursor and to paste.
 
+## Install
+
+Download the `.dmg` (macOS) or the `-setup.exe` (Windows) from [Releases](https://github.com/hansmissenheim/baoboard/releases). The builds are not code signed yet (#8):
+
+- macOS: the first time, right-click BaoBoard in Applications and choose **Open**.
+- Windows: if SmartScreen warns, choose **More info → Run anyway**.
+
 ## Develop
 
 ```sh
@@ -21,3 +28,5 @@ npm ci
 mise run dev    # run the app
 mise run check  # what CI runs
 ```
+
+To release, bump `version` in `src-tauri/tauri.conf.json`, run the **Release** workflow from the Actions tab, then review and publish the draft release it creates.
