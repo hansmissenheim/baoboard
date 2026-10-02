@@ -1,6 +1,6 @@
 import { convertFileSrc, invoke, type InvokeArgs } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Menu } from "@tauri-apps/api/menu";
+import { Menu, MenuItem } from "@tauri-apps/api/menu";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { move } from "./grid.ts";
@@ -29,6 +29,13 @@ let sticky = false;
 let picking = false;
 // The shortcut button is waiting for a key combination.
 let recording = false;
+// The sticker the context menu was opened on.
+let menuTarget = "";
+// Items passed inline to Menu.new lose their action once the menu is built,
+// so the item is created on its own first.
+const stickerMenu = MenuItem.new({ text: "Delete", action: () => remove(menuTarget) }).then((item) =>
+  Menu.new({ items: [item] }),
+);
 
 function say(text = "") {
   status.textContent = text;
@@ -63,8 +70,8 @@ function stickerCell(sticker: Sticker, i: number): HTMLElement {
   img.loading = "lazy";
   const el = cell(i + 1, `Sticker ${i + 1}`, img);
   el.addEventListener("contextmenu", async () => {
-    const items = [{ id: "delete", text: "Delete", action: () => remove(sticker.id) }];
-    await (await Menu.new({ items })).popup();
+    menuTarget = sticker.id;
+    await (await stickerMenu).popup();
   });
   return el;
 }
