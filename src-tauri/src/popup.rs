@@ -130,9 +130,9 @@ pub fn dismiss(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Dismisses the popup and sends ⌘V / Ctrl+V to the app underneath.
-pub fn paste_into_previous(app: &AppHandle) -> tauri::Result<()> {
-    dismiss(app)?;
+/// Sends ⌘V / Ctrl+V to the app underneath, once it has focus again after
+/// [`dismiss`].
+pub fn paste(app: &AppHandle) -> tauri::Result<()> {
     // ponytail: fixed wait for the previous app to take focus; poll the
     // frontmost app instead if pastes land too early on slow machines.
     thread::sleep(Duration::from_millis(150));
