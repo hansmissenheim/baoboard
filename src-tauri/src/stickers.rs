@@ -97,21 +97,25 @@ fn next_id() -> u64 {
 /// Returns a copy of `src` whose longest side is at most `size`: a GIF when
 /// the source is animated, otherwise a PNG. Smaller images are never upscaled.
 pub fn render(src: &Path, cache: &Path, size: u32) -> Result<PathBuf> {
+    let id = src.file_stem().ok_or("sticker has no name")?;
+    let dir = cache.join(size.to_string()).join(id);
+    // Check the cache before decoding: decoding every frame is the slow part.
+    for ext in ["gif", "png"] {
+        let out = dir.join(format!("sticker.{ext}"));
+        if out.exists() {
+            return Ok(out);
+        }
+    }
+
     let bytes = fs::read(src)?;
     let format = image::guess_format(&bytes)?;
     let frames = animation(&bytes, format)?;
-    let id = src.file_stem().ok_or("sticker has no name")?;
     let ext = if frames.is_some() { "gif" } else { "png" };
-    let out = cache
-        .join(size.to_string())
-        .join(id)
-        .join(format!("sticker.{ext}"));
-    if out.exists() {
-        return Ok(out);
-    }
-    fs::create_dir_all(out.parent().unwrap())?;
-    // Write under a temp name so a crash never leaves a half-written cache hit.
-    let tmp = out.with_extension("tmp");
+    let out = dir.join(format!("sticker.{ext}"));
+    fs::create_dir_all(&dir)?;
+    // Write under a unique temp name: a background render and a paste can
+    // render the same sticker at once, and a crash never leaves a half file.
+    let tmp = dir.join(format!("{}.tmp", next_id()));
 
     match frames {
         Some(frames) => {
@@ -297,6 +301,10 @@ mod tests {
         let frames = decoder.into_frames().collect_frames().unwrap();
         assert_eq!(frames.len(), 3);
         assert_eq!(frames[0].buffer().dimensions(), (240, 240));
+
+        // A cache hit never decodes the source.
+        fs::write(&src, b"not an image any more").unwrap();
+        assert_eq!(render(&src, &cache, 240).unwrap(), anim);
 
         // Small GIFs are passed through untouched.
         let small = save(&dir, &gif(32, 32, 2)).unwrap();

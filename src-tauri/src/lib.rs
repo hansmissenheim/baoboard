@@ -7,10 +7,7 @@ mod stickers;
 #[cfg(windows)]
 mod win;
 
-use std::{
-    path::{Path, PathBuf},
-    sync::Mutex,
-};
+use std::{path::PathBuf, sync::Mutex};
 
 use tauri::{
     AppHandle, Manager, State,
@@ -40,12 +37,35 @@ fn register_shortcut(
         })
 }
 
-fn save_all(dir: &Path, files: Vec<stickers::Result<Vec<u8>>>) -> Result<(), String> {
-    let errors: Vec<String> = files
-        .into_iter()
-        .filter_map(|bytes| bytes.and_then(|b| stickers::save(dir, &b)).err())
-        .map(|e| e.to_string())
-        .collect();
+/// Renders stickers at the paste size in the background, so picking one
+/// later only has to copy a cached file.
+fn prerender(app: &AppHandle, paths: Vec<PathBuf>) {
+    let cache = app.state::<Dirs>().cache.clone();
+    let size = app.state::<Mutex<Settings>>().lock().unwrap().size;
+    tauri::async_runtime::spawn_blocking(move || {
+        for path in paths {
+            if let Err(e) = stickers::render(&path, &cache, size) {
+                eprintln!("could not render {}: {e}", path.display());
+            }
+        }
+    });
+}
+
+fn prerender_all(app: &AppHandle) {
+    let all = stickers::list(&app.state::<Dirs>().stickers).unwrap_or_default();
+    prerender(app, all.into_iter().map(|s| s.path).collect());
+}
+
+fn save_all(app: &AppHandle, files: Vec<stickers::Result<Vec<u8>>>) -> Result<(), String> {
+    let dir = &app.state::<Dirs>().stickers;
+    let (mut saved, mut errors) = (Vec::new(), Vec::new());
+    for bytes in files {
+        match bytes.and_then(|b| stickers::save(dir, &b)) {
+            Ok(path) => saved.push(path),
+            Err(e) => errors.push(e.to_string()),
+        }
+    }
+    prerender(app, saved);
     match errors.is_empty() {
         true => Ok(()),
         false => Err(errors.join("\n")),
@@ -58,26 +78,23 @@ fn list_stickers(dirs: State<Dirs>) -> Result<Vec<stickers::Sticker>, String> {
 }
 
 #[tauri::command]
-async fn import_files(dirs: State<'_, Dirs>, paths: Vec<PathBuf>) -> Result<(), String> {
+async fn import_files(app: AppHandle, paths: Vec<PathBuf>) -> Result<(), String> {
     let files = paths.iter().map(|p| Ok(std::fs::read(p)?)).collect();
-    save_all(&dirs.stickers, files)
+    save_all(&app, files)
 }
 
 /// Takes the raw bytes of one image file as the request body.
 #[tauri::command]
-async fn import_bytes(dirs: State<'_, Dirs>, request: Request<'_>) -> Result<(), String> {
+async fn import_bytes(app: AppHandle, request: Request<'_>) -> Result<(), String> {
     let InvokeBody::Raw(bytes) = request.body() else {
         return Err("expected raw image bytes".into());
     };
-    save_all(&dirs.stickers, vec![Ok(bytes.clone())])
+    save_all(&app, vec![Ok(bytes.clone())])
 }
 
 #[tauri::command]
-async fn import_clipboard(dirs: State<'_, Dirs>) -> Result<(), String> {
-    save_all(
-        &dirs.stickers,
-        clipboard::read_images().map_err(|e| e.to_string())?,
-    )
+async fn import_clipboard(app: AppHandle) -> Result<(), String> {
+    save_all(&app, clipboard::read_images().map_err(|e| e.to_string())?)
 }
 
 #[tauri::command]
@@ -97,8 +114,10 @@ async fn send_sticker(
         let path = stickers::render(&stickers::find(&dirs.stickers, &id)?, &dirs.cache, size)?;
         clipboard::copy(&path)
     };
+    // Hide first, so the popup never lingers while a sticker renders.
+    popup::dismiss(&app).map_err(|e| e.to_string())?;
     copy().map_err(|e| e.to_string())?;
-    popup::paste_into_previous(&app).map_err(|e| e.to_string())
+    popup::paste(&app).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -130,6 +149,7 @@ fn get_settings(settings: State<Mutex<Settings>>) -> SettingsView {
 
 #[tauri::command]
 fn set_size(
+    app: AppHandle,
     dirs: State<Dirs>,
     settings: State<Mutex<Settings>>,
     size: u32,
@@ -144,11 +164,14 @@ fn set_size(
     let mut s = settings.lock().unwrap();
     let old = std::mem::replace(&mut s.size, size);
     settings::save(&dirs.settings, &s).map_err(|e| e.to_string())?;
+    let view = (&*s).into();
+    drop(s);
     if old != size {
         // Renders at the old size are never read again.
         let _ = std::fs::remove_dir_all(dirs.cache.join(old.to_string()));
+        prerender_all(&app);
     }
-    Ok((&*s).into())
+    Ok(view)
 }
 
 /// Async so the plugin's hop to the main thread never waits on itself.
@@ -233,6 +256,7 @@ pub fn run() {
                 cache,
                 settings: settings_path,
             });
+            prerender_all(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
