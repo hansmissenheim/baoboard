@@ -67,8 +67,12 @@ pub fn toggle(app: &AppHandle, sticky: bool) -> tauri::Result<()> {
     if window.is_visible()? {
         return dismiss(app);
     }
+    // A tray click focuses the taskbar, so only the shortcut knows which
+    // window to paste into.
     #[cfg(windows)]
-    platform::remember_foreground();
+    if !sticky {
+        platform::remember_foreground();
+    }
 
     let caret = if sticky { None } else { platform::caret() };
     let anchor = match caret {

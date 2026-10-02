@@ -9,7 +9,25 @@
   </head>
   <body>
     <main id="grid" role="listbox" aria-label="Stickers"></main>
-    <footer id="status" role="status"></footer>
+    <section id="settings" hidden>
+      <label>
+        Sticker size
+        <select id="size">
+          <option value="128">128 px</option>
+          <option value="160">160 px</option>
+          <option value="240">240 px</option>
+          <option value="320">320 px</option>
+        </select>
+      </label>
+      <label>
+        Shortcut
+        <button id="shortcut" type="button"></button>
+      </label>
+    </section>
+    <footer>
+      <span id="status" role="status"></span>
+      <button id="gear" type="button" aria-label="Settings">⚙︎</button>
+    </footer>
     <input id="picker" type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/bmp" multiple hidden />
   </body>
 </html>

@@ -4,8 +4,10 @@ import { Menu } from "@tauri-apps/api/menu";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { move } from "./grid.ts";
+import { accelerator } from "./shortcut.ts";
 
 type Sticker = { id: string; path: string };
+type Settings = { size: number; shortcut: string; label: string };
 
 const COLS = 5; // matches grid-template-columns in styles.css
 const PASTE = navigator.userAgent.includes("Mac") ? "⌘V" : "Ctrl+V";
@@ -13,6 +15,9 @@ const PASTE = navigator.userAgent.includes("Mac") ? "⌘V" : "Ctrl+V";
 const grid = document.querySelector<HTMLElement>("#grid")!;
 const status = document.querySelector<HTMLElement>("#status")!;
 const picker = document.querySelector<HTMLInputElement>("#picker")!;
+const settings = document.querySelector<HTMLElement>("#settings")!;
+const sizeSelect = document.querySelector<HTMLSelectElement>("#size")!;
+const shortcutButton = document.querySelector<HTMLButtonElement>("#shortcut")!;
 
 let stickers: Sticker[] = [];
 // Cell 0 is the add button, so sticker i sits in cell i + 1.
@@ -22,6 +27,8 @@ let pendingDelete: string | null = null;
 let sticky = false;
 // The file picker steals focus without meaning "close the popup".
 let picking = false;
+// The shortcut button is waiting for a key combination.
+let recording = false;
 
 function say(text = "") {
   status.textContent = text;
@@ -103,8 +110,58 @@ async function importFrom(cmd: string, args?: InvokeArgs) {
   await refresh();
 }
 
+function showSettings(open: boolean) {
+  settings.hidden = !open;
+  grid.hidden = open;
+  recording = false;
+  say();
+  if (open) invoke<Settings>("get_settings").then(showValues);
+}
+
+function showValues(s: Settings) {
+  sizeSelect.value = String(s.size);
+  shortcutButton.textContent = s.label;
+}
+
+async function update(cmd: string, args: InvokeArgs) {
+  try {
+    showValues(await invoke<Settings>(cmd, args));
+    say();
+  } catch (e) {
+    say(String(e));
+    showValues(await invoke<Settings>("get_settings"));
+  }
+}
+
+function settingsKey(e: KeyboardEvent) {
+  if (!recording) {
+    if (e.key === "Escape") showSettings(false);
+    return; // let the form controls handle everything else
+  }
+  e.preventDefault();
+  if (e.key === "Escape") {
+    recording = false;
+    invoke<Settings>("get_settings").then(showValues);
+    return;
+  }
+  const shortcut = accelerator(e);
+  if (shortcut) {
+    recording = false;
+    update("set_shortcut", { shortcut });
+  }
+}
+
+sizeSelect.addEventListener("change", () => update("set_size", { size: Number(sizeSelect.value) }));
+shortcutButton.addEventListener("click", () => {
+  recording = true;
+  shortcutButton.textContent = "Press keys…";
+});
+document.querySelector("#gear")!.addEventListener("click", () => showSettings(Boolean(settings.hidden)));
+
 window.addEventListener("keydown", (e) => {
-  if ((e.metaKey || e.ctrlKey) && e.key === "v") {
+  if (!settings.hidden) {
+    settingsKey(e);
+  } else if ((e.metaKey || e.ctrlKey) && e.key === "v") {
     e.preventDefault();
     importFrom("import_clipboard");
   } else if (e.key.startsWith("Arrow")) {
@@ -142,6 +199,7 @@ getCurrentWebview().onDragDropEvent(({ payload }) => {
 });
 
 listen<boolean>("opened", ({ payload }) => {
+  showSettings(false);
   sticky = payload;
   say(sticky ? "Drop images here to add them" : "");
 });
