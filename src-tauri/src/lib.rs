@@ -16,6 +16,7 @@ use tauri::{
     tray::TrayIconBuilder,
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+use tauri_plugin_updater::UpdaterExt;
 
 use settings::Settings;
 
@@ -260,11 +261,31 @@ fn tray(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Installs the latest GitHub release, if it's newer, and restarts into it.
+// ponytail: checks once per launch; add a periodic check if the app stays open for weeks.
+async fn update(app: AppHandle) -> tauri_plugin_updater::Result<()> {
+    if let Some(update) = app.updater()?.check().await? {
+        update.download_and_install(|_, _| {}, || {}).await?;
+        app.restart();
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
+            // Dev builds would otherwise install the latest release over themselves.
+            if !cfg!(debug_assertions) {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(e) = update(handle).await {
+                        eprintln!("update check failed: {e}");
+                    }
+                });
+            }
             #[cfg(target_os = "macos")]
             {
                 // No Dock icon: BaoBoard lives in the menu bar.
