@@ -20,6 +20,8 @@ Download the `.dmg` (macOS) or the `-setup.exe` (Windows) from [Releases](https:
 - macOS: drag BaoBoard to Applications and open it. When macOS says it can't verify the app, go to System Settings → Privacy & Security and click **Open Anyway**.
 - Windows: if SmartScreen warns, choose **More info → Run anyway**.
 
+After that, BaoBoard checks for a newer release on launch and updates itself.
+
 ## Develop
 
 ```sh

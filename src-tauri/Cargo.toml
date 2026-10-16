@@ -23,6 +23,7 @@ serde_json = "1"
 image = { version = "0.25", default-features = false, features = ["gif", "png", "jpeg", "webp", "bmp"] }
 clipboard-rs = "0.3"
 tauri-plugin-global-shortcut = "2"
+tauri-plugin-updater = "2"
 enigo = "0.6"
 
 # Decoding and re-encoding GIFs is many times slower unoptimized, which makes
