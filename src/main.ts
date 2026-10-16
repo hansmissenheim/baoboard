@@ -1,9 +1,9 @@
-import { convertFileSrc, invoke, type InvokeArgs } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke, type InvokeArgs, type InvokeOptions } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Menu, MenuItem } from "@tauri-apps/api/menu";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { move } from "./grid.ts";
+import { toFrames } from "./media.ts";
 import { accelerator } from "./shortcut.ts";
 
 type Sticker = { id: string; path: string };
@@ -41,9 +41,9 @@ function say(text = "") {
   status.textContent = text;
 }
 
-async function call(cmd: string, args?: InvokeArgs): Promise<boolean> {
+async function call(cmd: string, args?: InvokeArgs, options?: InvokeOptions): Promise<boolean> {
   try {
-    await invoke(cmd, args);
+    await invoke(cmd, args, options);
     return true;
   } catch (e) {
     say(String(e));
@@ -108,13 +108,32 @@ async function remove(id: string) {
   await refresh();
 }
 
-async function importFrom(cmd: string, args?: InvokeArgs) {
-  if (await call(cmd, args)) {
+async function importFrom(cmd: string, args?: InvokeArgs, options?: InvokeOptions) {
+  if (await call(cmd, args, options)) {
     selected = 1;
     say();
   }
   // Refresh either way: a batch can partly succeed.
   await refresh();
+}
+
+async function importFiles(files: Iterable<File>) {
+  for (const file of files) {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    say(`Adding ${file.name}…`);
+    try {
+      const frames = await toFrames(bytes);
+      if (!frames) {
+        await importFrom("import_bytes", bytes);
+        continue;
+      }
+      const { width, height, delays, pixels } = frames;
+      const headers = { width: String(width), height: String(height), delays: delays.join(",") };
+      await importFrom("import_frames", pixels, { headers });
+    } catch (e) {
+      say(`${file.name}: ${e}`);
+    }
+  }
 }
 
 function showSettings(open: boolean) {
@@ -194,15 +213,23 @@ window.addEventListener("keydown", (e) => {
 picker.addEventListener("cancel", () => (picking = false));
 picker.addEventListener("change", async () => {
   picking = false;
-  for (const file of picker.files ?? []) {
-    await importFrom("import_bytes", new Uint8Array(await file.arrayBuffer()));
-  }
+  await importFiles(picker.files ?? []);
   picker.value = "";
 });
 
-getCurrentWebview().onDragDropEvent(({ payload }) => {
-  document.body.classList.toggle("dropping", payload.type === "enter" || payload.type === "over");
-  if (payload.type === "drop") importFrom("import_files", { paths: payload.paths });
+// HTML drops hand over file contents, which formats like MP4 need to be
+// decoded here, where Tauri's drop event only gives paths.
+document.addEventListener("dragover", (e) => {
+  e.preventDefault();
+  document.body.classList.add("dropping");
+});
+document.addEventListener("dragleave", (e) => {
+  if (!e.relatedTarget) document.body.classList.remove("dropping");
+});
+document.addEventListener("drop", (e) => {
+  e.preventDefault();
+  document.body.classList.remove("dropping");
+  importFiles(e.dataTransfer?.files ?? []);
 });
 
 listen<boolean>("opened", ({ payload }) => {

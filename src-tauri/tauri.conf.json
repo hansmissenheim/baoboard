@@ -20,13 +20,14 @@
         "visible": false,
         "decorations": false,
         "resizable": false,
+        "dragDropEnabled": false,
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "visibleOnAllWorkspaces": true
       }
     ],
     "security": {
-      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost",
+      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost; media-src blob:",
       "assetProtocol": {
         "enable": true,
         "scope": [
