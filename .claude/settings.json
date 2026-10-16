@@ -3,8 +3,22 @@
     "allow": [
       "Bash(mise run check)",
       "Bash(npm ci)",
+      "Bash(npm run build)",
+      "Bash(node --test *)",
       "Bash(cargo test *)",
+      "Bash(cargo fmt *)",
+      "Bash(cargo clippy *)",
       "Bash(git fetch *)",
+      "Bash(git switch *)",
+      "Bash(git checkout -b *)",
+      "Bash(git branch -m *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push)",
+      "Bash(git push -u origin mxbch-*)",
+      "Bash(gh pr create *)",
+      "Bash(gh pr edit *)",
+      "Bash(gh pr merge * --squash)",
       "Bash(gh pr view *)",
       "Bash(gh pr list *)",
       "Bash(gh pr diff *)",
@@ -12,7 +26,8 @@
       "Bash(gh run view *)",
       "Bash(gh run list *)",
       "Bash(gh issue view *)",
-      "Bash(gh issue list *)"
+      "Bash(gh issue list *)",
+      "Bash(gh issue create *)"
     ]
   }
 }

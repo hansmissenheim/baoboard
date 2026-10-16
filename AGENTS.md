@@ -10,10 +10,17 @@ Code behind `#[cfg(windows)]` doesn't compile on a Mac, so CI is its only check.
 
 ## Workflow
 
-- Branch from `main` as `mxbch-<kebab-target>`. Each change gets its own PR. Main is protected, PRs are squash-merged once CI is green, and the branch is deleted on merge.
-- PR bodies follow `.github/pull_request_template.md`.
-- A PR with a single commit uses a Conventional Commit message, so it fills in the PR title. Otherwise, write plain, short commit messages.
-- Ideas we aren't building yet are issues labeled `discovery`. Check there before starting a feature.
+A feature or bug-fix request is the owner's go-ahead to ship it. Branch, commit, push, PR, `discovery` issues, and squash-merge are granted up front, so run this loop to a merged PR and ask only in step 1. Ask before anything outside the loop, such as running the Release workflow or changing repo settings.
+
+1. **Scope.** Read the code the change touches and check the `discovery` issues for a matching idea. Ask the owner, in one batch, whatever changes what gets built: user-visible behavior with more than one reasonable answer, a new crate or npm package, or anything that deletes or migrates user data. Pick defaults for the rest and list them in the PR. Done when the only open questions are ones you can default.
+2. **Build.** Branch from `origin/main` as `mxbch-<kebab-target>`, renaming an app-made worktree branch with `git branch -m`. Done when `mise run check` is green locally and the new branching logic has tests.
+3. **Review.** Run the `code-review` skill on the branch diff, fix the confirmed findings, and rerun the gate. Done when a pass finds nothing to fix.
+4. **PR.** Push and open it with `gh pr create`. The body follows `.github/pull_request_template.md` with its comments replaced, and the test plan names what you ran, what you clicked, and each platform path left unchecked. Add `closes #<n>` when an issue asked for the change.
+5. **CI.** Run `gh pr checks <n> --watch` in the background. On red, read `gh run view <id> --log-failed`, fix, push, and watch again. Done when every check is green, Windows included.
+6. **Merge.** `gh pr merge <n> --squash`, which also deletes the remote branch. Done when the PR shows merged.
+7. **Report.** A few lines to the owner: what shipped, the PR link, the defaults you chose, and what still needs a hand check, such as mouse-driven UI or Windows behavior.
+
+Ideas that turn up along the way and aren't part of the request become `discovery` issues. A PR with a single commit uses a Conventional Commit message, so it fills in the PR title. Otherwise, write plain, short commit messages.
 
 ## Gotchas
 
