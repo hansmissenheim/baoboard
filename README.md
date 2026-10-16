@@ -15,9 +15,9 @@ On macOS, BaoBoard asks for Accessibility access on first launch. It needs this 
 
 ## Install
 
-Download the `.dmg` (macOS) or the `-setup.exe` (Windows) from [Releases](https://github.com/hansmissenheim/baoboard/releases). The builds are not code signed yet (#8):
+Download the `.dmg` (macOS) or the `-setup.exe` (Windows) from [Releases](https://github.com/hansmissenheim/baoboard/releases). The macOS build is self-signed and the Windows build is unsigned, so the OS warns on first install (#8):
 
-- macOS: drag BaoBoard to Applications and open it. When macOS says it can't verify the app, go to System Settings → Privacy & Security and click **Open Anyway**. After each update, grant Accessibility access again.
+- macOS: drag BaoBoard to Applications and open it. When macOS says it can't verify the app, go to System Settings → Privacy & Security and click **Open Anyway**.
 - Windows: if SmartScreen warns, choose **More info → Run anyway**.
 
 ## Develop
