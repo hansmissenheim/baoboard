@@ -27,8 +27,11 @@ After that, BaoBoard checks for a newer release on launch and updates itself.
 ```sh
 mise install
 npm ci
-mise run dev    # run the app
-mise run check  # what CI runs
+mise run dev      # run the app
+mise run check    # what CI runs
+mise run install  # build and install to /Applications (macOS)
 ```
+
+`mise run install` builds with your local version number, so the updater replaces it once a newer release is published. Each build is signed ad hoc with a new signature, so macOS drops the Accessibility grant; remove BaoBoard from System Settings → Privacy & Security → Accessibility and add it again after installing.
 
 To release, bump `version` in `src-tauri/tauri.conf.json`, run the **Release** workflow from the Actions tab, then review and publish the draft release it creates.
