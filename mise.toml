@@ -15,3 +15,14 @@ run = [
 [tasks.dev]
 description = "Run the app with hot reload"
 run = "npm run tauri dev"
+
+[tasks.install]
+description = "Build the app and install it to /Applications (macOS)"
+run = [
+  # The updater bundles need the release signing key, which only CI has.
+  """npm run tauri build -- --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}'""",
+  "pkill -x baoboard || true",
+  "rm -rf /Applications/BaoBoard.app",
+  "mv src-tauri/target/release/bundle/macos/BaoBoard.app /Applications/",
+  "open /Applications/BaoBoard.app",
+]
