@@ -29,9 +29,26 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm ci
+      # A self-signed certificate keeps the signature stable across releases, so
+      # macOS keeps the Accessibility grant after an update. Tauri's own
+      # APPLE_CERTIFICATE import only accepts Apple-issued certificates.
+      - if: runner.os == 'macOS'
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          echo "$MACOS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p ci "$keychain"
+          security set-keychain-settings "$keychain"
+          security unlock-keychain -p ci "$keychain"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -k ci "$keychain" > /dev/null
+          security list-keychains -d user | xargs security list-keychains -d user -s "$keychain"
       - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # action-v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && 'BaoBoard Self-Signed' || '' }}
         with:
           tagName: v__VERSION__
           releaseName: BaoBoard v__VERSION__
