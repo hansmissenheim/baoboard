@@ -277,12 +277,15 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
-            let handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                if let Err(e) = update(handle).await {
-                    eprintln!("update check failed: {e}");
-                }
-            });
+            // Dev builds would otherwise install the latest release over themselves.
+            if !cfg!(debug_assertions) {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(e) = update(handle).await {
+                        eprintln!("update check failed: {e}");
+                    }
+                });
+            }
             #[cfg(target_os = "macos")]
             {
                 // No Dock icon: BaoBoard lives in the menu bar.

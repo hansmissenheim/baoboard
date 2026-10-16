@@ -57,4 +57,7 @@ jobs:
           releaseName: BaoBoard v__VERSION__
           releaseDraft: true
           generateReleaseNotes: true
+          # The README points Windows users at the NSIS setup, so update that
+          # install instead of adding a second one from the MSI.
+          updaterJsonPreferNsis: true
           args: ${{ matrix.args }}
