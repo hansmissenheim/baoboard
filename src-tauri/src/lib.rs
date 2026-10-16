@@ -77,12 +77,6 @@ fn list_stickers(dirs: State<Dirs>) -> Result<Vec<stickers::Sticker>, String> {
     stickers::list(&dirs.stickers).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-async fn import_files(app: AppHandle, paths: Vec<PathBuf>) -> Result<(), String> {
-    let files = paths.iter().map(|p| Ok(std::fs::read(p)?)).collect();
-    save_all(&app, files)
-}
-
 /// Takes the raw bytes of one image file as the request body.
 #[tauri::command]
 async fn import_bytes(app: AppHandle, request: Request<'_>) -> Result<(), String> {
@@ -90,6 +84,47 @@ async fn import_bytes(app: AppHandle, request: Request<'_>) -> Result<(), String
         return Err("expected raw image bytes".into());
     };
     save_all(&app, vec![Ok(bytes.clone())])
+}
+
+/// Takes frames the webview decoded as the request body: RGBA pixels, frame
+/// after frame, sized by the `width` and `height` headers, with the
+/// comma-separated `delays` header giving each frame's time in ms.
+#[tauri::command]
+async fn import_frames(app: AppHandle, request: Request<'_>) -> Result<(), String> {
+    let InvokeBody::Raw(pixels) = request.body() else {
+        return Err("expected raw frame pixels".into());
+    };
+    let header = |name| {
+        request
+            .headers()
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .ok_or(format!("missing {name} header"))
+    };
+    let number = |s: &str| s.parse::<u32>().map_err(|e| e.to_string());
+    let (w, h) = (number(header("width")?)?, number(header("height")?)?);
+    let delays = header("delays")?.split(',').map(number);
+    let size = w as usize * h as usize * 4;
+    if size == 0 || pixels.len() != size * delays.clone().count() {
+        return Err("frame pixels don't match their size".into());
+    }
+    let frames = pixels
+        .chunks(size)
+        .zip(delays)
+        .map(|(buf, delay)| {
+            let buf = image::RgbaImage::from_raw(w, h, buf.to_vec()).unwrap();
+            Ok(image::Frame::from_parts(
+                buf,
+                0,
+                0,
+                image::Delay::from_numer_denom_ms(delay?, 1),
+            ))
+        })
+        .collect::<Result<_, String>>()?;
+    let path =
+        stickers::save_frames(&app.state::<Dirs>().stickers, frames).map_err(|e| e.to_string())?;
+    prerender(&app, vec![path]);
+    Ok(())
 }
 
 #[tauri::command]
@@ -261,7 +296,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             list_stickers,
-            import_files,
+            import_frames,
             import_bytes,
             import_clipboard,
             delete_sticker,

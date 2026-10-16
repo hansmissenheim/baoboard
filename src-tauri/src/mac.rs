@@ -1,5 +1,5 @@
-//! Accessibility API calls. All of them need the user to have granted
-//! BaoBoard (or, under `mise run dev`, the terminal) Accessibility access.
+//! macOS-only calls: Accessibility, which needs the user to have granted
+//! BaoBoard (or, under `mise run dev`, the terminal) access, and ImageIO.
 
 use std::ptr::{self, NonNull};
 
@@ -7,7 +7,13 @@ use objc2_application_services::{
     AXError, AXIsProcessTrustedWithOptions, AXUIElement, AXValue, AXValueType,
     kAXTrustedCheckOptionPrompt,
 };
-use objc2_core_foundation::{CFBoolean, CFDictionary, CFRetained, CFString, CFType, CGRect};
+use objc2_core_foundation::{
+    CFBoolean, CFData, CFDictionary, CFMutableData, CFRetained, CFString, CFType, CGRect,
+};
+use objc2_image_io::{
+    CGImageDestination, CGImageSource, kCGImagePropertyAVISDictionary,
+    kCGImagePropertyPNGDictionary,
+};
 
 use crate::popup::Rect;
 
@@ -72,4 +78,28 @@ pub fn caret() -> Option<Rect> {
         w: rect.size.width,
         h: rect.size.height,
     })
+}
+
+/// Re-encodes an AVIF as a PNG, animated (APNG) when the AVIF is, since the
+/// `image` crate can't decode AV1. ImageIO reads AVIF from macOS 13.
+pub fn avif_to_png(avif: &[u8]) -> Option<Vec<u8>> {
+    let src = unsafe { CGImageSource::with_data(&CFData::from_bytes(avif), None) }?;
+    let count = unsafe { src.count() };
+    let png = CFMutableData::new(None, 0)?;
+    let dest = unsafe {
+        CGImageDestination::with_data(&png, &CFString::from_static_str("public.png"), count, None)
+    }?;
+    for i in 0..count {
+        // AVIS frame timing uses the same keys as APNG's, so it carries over.
+        let timing = unsafe { src.properties_at_index(i, None) }
+            .and_then(|p| {
+                unsafe { p.cast_unchecked::<CFString, CFType>() }
+                    .get(unsafe { kCGImagePropertyAVISDictionary })
+            })
+            .map(|t| {
+                CFDictionary::from_slices(&[unsafe { kCGImagePropertyPNGDictionary }], &[&*t])
+            });
+        unsafe { dest.add_image_from_source(&src, i, timing.as_deref().map(|t| t.as_opaque())) };
+    }
+    unsafe { dest.finalize() }.then(|| png.to_vec())
 }

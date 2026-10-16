@@ -50,6 +50,7 @@ strip = true
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-application-services = "0.3"
 objc2-core-foundation = "0.3"
+objc2-image-io = { version = "0.3", default-features = false, features = ["std", "CGImageDestination", "CGImageProperties", "CGImageSource"] }
 
 [target."cfg(windows)".dependencies]
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_UI_Accessibility", "Win32_System_Variant", "Win32_System_Com"] }

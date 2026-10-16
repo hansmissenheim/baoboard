@@ -4,7 +4,7 @@
 use std::{
     error::Error,
     fs,
-    io::Cursor,
+    io::{Cursor, Write},
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
@@ -60,6 +60,15 @@ pub fn find(dir: &Path, id: &str) -> Result<PathBuf> {
 }
 
 pub fn save(dir: &Path, bytes: &[u8]) -> Result<PathBuf> {
+    // Elsewhere the webview decodes AVIF and hands over frames instead.
+    #[cfg(target_os = "macos")]
+    if bytes
+        .get(4..12)
+        .is_some_and(|b| b == b"ftypavif" || b == b"ftypavis")
+    {
+        let png = crate::mac::avif_to_png(bytes).ok_or("could not read the AVIF image")?;
+        return save(dir, &png);
+    }
     let format = image::guess_format(bytes)?;
     let ext = format.extensions_str()[0];
     if !EXTENSIONS.contains(&ext) {
@@ -70,6 +79,20 @@ pub fn save(dir: &Path, bytes: &[u8]) -> Result<PathBuf> {
     let path = dir.join(format!("{}.{ext}", next_id()));
     fs::write(&path, bytes)?;
     Ok(path)
+}
+
+/// Saves frames the webview decoded from a format the `image` crate can't
+/// read, such as MP4: a PNG for one frame, otherwise a GIF.
+pub fn save_frames(dir: &Path, frames: Vec<Frame>) -> Result<PathBuf> {
+    let mut bytes = Vec::new();
+    match frames.len() {
+        0 => return Err("no frames".into()),
+        1 => frames[0]
+            .buffer()
+            .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Png)?,
+        _ => encode_gif(&mut bytes, frames)?,
+    }
+    save(dir, &bytes)
 }
 
 pub fn delete(dir: &Path, cache: &Path, id: &str) -> Result<()> {
@@ -124,17 +147,10 @@ pub fn render(src: &Path, cache: &Path, size: u32) -> Result<PathBuf> {
             if format == ImageFormat::Gif && (fw, fh) == (w, h) {
                 fs::write(&tmp, &bytes)?;
             } else {
-                let mut encoder = GifEncoder::new_with_speed(fs::File::create(&tmp)?, 10);
-                encoder.set_repeat(Repeat::Infinite)?;
-                encoder.encode_frames(frames.into_iter().map(|frame| {
-                    let mut buf = resize(frame.buffer(), fw, fh);
-                    // GIF has 1-bit transparency, and the encoder treats any
-                    // alpha above 0 as opaque, so cut at half instead.
-                    for p in buf.pixels_mut() {
-                        p[3] = if p[3] < 128 { 0 } else { 255 };
-                    }
-                    Frame::from_parts(buf, 0, 0, frame.delay())
-                }))?;
+                let frames = frames.into_iter().map(|frame| {
+                    Frame::from_parts(resize(frame.buffer(), fw, fh), 0, 0, frame.delay())
+                });
+                encode_gif(fs::File::create(&tmp)?, frames)?;
             }
         }
         None => {
@@ -150,6 +166,22 @@ pub fn render(src: &Path, cache: &Path, size: u32) -> Result<PathBuf> {
     }
     fs::rename(&tmp, &out)?;
     Ok(out)
+}
+
+fn encode_gif(out: impl Write, frames: impl IntoIterator<Item = Frame>) -> Result<()> {
+    let mut encoder = GifEncoder::new_with_speed(out, 10);
+    encoder.set_repeat(Repeat::Infinite)?;
+    encoder.encode_frames(frames.into_iter().map(|frame| {
+        let delay = frame.delay();
+        let mut buf = frame.into_buffer();
+        // GIF has 1-bit transparency, and the encoder treats any alpha above
+        // 0 as opaque, so cut at half instead.
+        for p in buf.pixels_mut() {
+            p[3] = if p[3] < 128 { 0 } else { 255 };
+        }
+        Frame::from_parts(buf, 0, 0, delay)
+    }))?;
+    Ok(())
 }
 
 /// The frames of an animated image, or `None` for a still one.
@@ -310,5 +342,33 @@ mod tests {
         let small = save(&dir, &gif(32, 32, 2)).unwrap();
         let out = render(&small, &cache, 240).unwrap();
         assert_eq!(fs::read(out).unwrap(), fs::read(small).unwrap());
+    }
+
+    #[test]
+    fn save_frames_stores_one_frame_as_png_and_more_as_gif() {
+        let dir = tempdir("lib");
+        let frame = |px| {
+            let delay = Delay::from_numer_denom_ms(50, 1);
+            Frame::from_parts(RgbaImage::from_pixel(8, 8, Rgba(px)), 0, 0, delay)
+        };
+        let still = save_frames(&dir, vec![frame([255, 0, 0, 255])]).unwrap();
+        assert_eq!(still.extension().unwrap(), "png");
+        let anim =
+            save_frames(&dir, vec![frame([255, 0, 0, 255]), frame([0, 0, 255, 255])]).unwrap();
+        assert_eq!(anim.extension().unwrap(), "gif");
+        assert!(save_frames(&dir, vec![]).is_err());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn save_converts_animated_avif() {
+        let (dir, cache) = (tempdir("lib"), tempdir("cache"));
+        let src = save(&dir, include_bytes!("../testdata/anim.avif")).unwrap();
+        assert_eq!(src.extension().unwrap(), "png");
+        let anim = render(&src, &cache, 240).unwrap();
+        let decoder = GifDecoder::new(Cursor::new(fs::read(&anim).unwrap())).unwrap();
+        let frames = decoder.into_frames().collect_frames().unwrap();
+        assert_eq!(frames.len(), 3);
+        assert_eq!(frames[0].delay(), Delay::from_numer_denom_ms(100, 1));
     }
 }
