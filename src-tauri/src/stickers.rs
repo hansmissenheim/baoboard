@@ -2,6 +2,7 @@
 //! copies scaled to the paste size are rendered into a cache on demand.
 
 use std::{
+    collections::HashMap,
     error::Error,
     fs,
     io::{Cursor, Write},
@@ -23,6 +24,8 @@ use image::{
 pub type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
 
 const EXTENSIONS: [&str; 5] = ["png", "jpg", "gif", "webp", "bmp"];
+/// Sticker ids in the order the user arranged them.
+const ORDER: &str = "order.json";
 
 #[derive(serde::Serialize)]
 pub struct Sticker {
@@ -30,7 +33,8 @@ pub struct Sticker {
     pub path: PathBuf,
 }
 
-/// All stickers, newest first.
+/// All stickers: ones added since the last reorder first, newest first,
+/// then the rest in the order the user arranged.
 pub fn list(dir: &Path) -> Result<Vec<Sticker>> {
     let mut stickers: Vec<Sticker> = fs::read_dir(dir)?
         .filter_map(|entry| entry.ok().map(|e| e.path()))
@@ -46,7 +50,30 @@ pub fn list(dir: &Path) -> Result<Vec<Sticker>> {
         .collect();
     // Ids are 13-digit millisecond timestamps, so string order is age order.
     stickers.sort_by(|a, b| b.id.cmp(&a.id));
+    let order: Vec<String> = fs::read(dir.join(ORDER))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default();
+    let position: HashMap<_, _> = order.iter().zip(1..).collect();
+    // A stable sort keeps unarranged stickers (position 0) newest first.
+    stickers.sort_by_key(|s| position.get(&s.id).copied().unwrap_or(0));
     Ok(stickers)
+}
+
+/// Moves a sticker to `index` in the list.
+pub fn reorder(dir: &Path, id: &str, index: usize) -> Result<()> {
+    let mut ids: Vec<String> = list(dir)?.into_iter().map(|s| s.id).collect();
+    let from = ids
+        .iter()
+        .position(|i| i == id)
+        .ok_or_else(|| format!("no sticker {id}"))?;
+    let id = ids.remove(from);
+    ids.insert(index.min(ids.len()), id);
+    // A crash mid-write must never leave a half file that loses the order.
+    let tmp = dir.join(format!("{ORDER}.tmp"));
+    fs::write(&tmp, serde_json::to_vec(&ids)?)?;
+    fs::rename(&tmp, dir.join(ORDER))?;
+    Ok(())
 }
 
 /// Looks an id up among the stored files, so a caller-supplied id can never
@@ -316,6 +343,30 @@ mod tests {
         delete(&dir, &cache, id).unwrap();
         assert!(!first.exists());
         assert!(!cache.join("4").join(id).exists());
+    }
+
+    #[test]
+    fn reorder_persists_and_new_stickers_go_first() {
+        let dir = tempdir("order");
+        let id = |p: PathBuf| p.file_stem().unwrap().to_str().unwrap().to_owned();
+        let ids = || -> Vec<String> { list(&dir).unwrap().into_iter().map(|s| s.id).collect() };
+        let a = id(save(&dir, &png(8, 8)).unwrap());
+        let b = id(save(&dir, &png(8, 8)).unwrap());
+        let c = id(save(&dir, &png(8, 8)).unwrap());
+        assert_eq!(ids(), [&c, &b, &a].map(String::as_str));
+
+        reorder(&dir, &a, 0).unwrap();
+        assert_eq!(ids(), [&a, &c, &b].map(String::as_str));
+        reorder(&dir, &a, 99).unwrap();
+        assert_eq!(ids(), [&c, &b, &a].map(String::as_str));
+        reorder(&dir, &c, 1).unwrap();
+        assert_eq!(ids(), [&b, &c, &a].map(String::as_str));
+        assert!(reorder(&dir, "missing", 0).is_err());
+
+        let d = id(save(&dir, &png(8, 8)).unwrap());
+        assert_eq!(ids(), [&d, &b, &c, &a].map(String::as_str));
+        delete(&dir, &tempdir("cache"), &c).unwrap();
+        assert_eq!(ids(), [&d, &b, &a].map(String::as_str));
     }
 
     #[test]
