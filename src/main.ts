@@ -31,11 +31,14 @@ let picking = false;
 let recording = false;
 // The sticker the context menu was opened on.
 let menuTarget = "";
+// The sticker being dragged to a new spot.
+let dragging: string | null = null;
 // Items passed inline to Menu.new lose their action once the menu is built,
-// so the item is created on its own first.
-const stickerMenu = MenuItem.new({ text: "Delete", action: () => remove(menuTarget) }).then((item) =>
-  Menu.new({ items: [item] }),
-);
+// so the items are created on their own first.
+const stickerMenu = Promise.all([
+  MenuItem.new({ text: "Move to Front", action: () => reorder(menuTarget, 0) }),
+  MenuItem.new({ text: "Delete", action: () => remove(menuTarget) }),
+]).then((items) => Menu.new({ items }));
 
 function say(text = "") {
   status.textContent = text;
@@ -69,6 +72,13 @@ function stickerCell(sticker: Sticker, i: number): HTMLElement {
   img.draggable = false;
   img.loading = "lazy";
   const el = cell(i + 1, `Sticker ${i + 1}`, img);
+  el.draggable = true;
+  el.addEventListener("dragstart", (e) => {
+    dragging = sticker.id;
+    // Some WebKit builds start no drag without data.
+    e.dataTransfer?.setData("text/plain", sticker.id);
+  });
+  el.addEventListener("dragend", () => (dragging = null));
   el.addEventListener("contextmenu", async () => {
     menuTarget = sticker.id;
     await (await stickerMenu).popup();
@@ -106,6 +116,20 @@ function activate(i: number) {
 async function remove(id: string) {
   if (await call("delete_sticker", { id })) say();
   await refresh();
+}
+
+async function reorder(id: string, index: number) {
+  if (await call("reorder_sticker", { id, index })) {
+    selected = index + 1;
+    say();
+  }
+  await refresh();
+}
+
+/** The grid cell index under a drag, or -1 when it isn't over one. */
+function cellAt(e: DragEvent): number {
+  const el = (e.target as Element).closest(".cell");
+  return el ? [...grid.children].indexOf(el) : -1;
 }
 
 async function importFrom(cmd: string, args?: InvokeArgs, options?: InvokeOptions) {
@@ -221,7 +245,11 @@ picker.addEventListener("change", async () => {
 // decoded here, where Tauri's drop event only gives paths.
 document.addEventListener("dragover", (e) => {
   e.preventDefault();
-  document.body.classList.add("dropping");
+  if (dragging === null) document.body.classList.add("dropping");
+  else {
+    const i = cellAt(e);
+    if (i >= 0 && i !== selected) select(i);
+  }
 });
 document.addEventListener("dragleave", (e) => {
   if (!e.relatedTarget) document.body.classList.remove("dropping");
@@ -229,11 +257,19 @@ document.addEventListener("dragleave", (e) => {
 document.addEventListener("drop", (e) => {
   e.preventDefault();
   document.body.classList.remove("dropping");
-  importFiles(e.dataTransfer?.files ?? []);
+  if (dragging === null) {
+    importFiles(e.dataTransfer?.files ?? []);
+  } else if (cellAt(e) >= 0) {
+    // Dropping on the add button moves the sticker to the front.
+    reorder(dragging, Math.max(cellAt(e) - 1, 0));
+  }
+  dragging = null;
 });
 
 listen<boolean>("opened", ({ payload }) => {
   showSettings(false);
+  // A drag that left the window may never have seen its dragend.
+  dragging = null;
   sticky = payload;
   say(sticky ? "Drop images here to add them" : "");
 });

@@ -139,6 +139,11 @@ fn delete_sticker(dirs: State<Dirs>, id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn reorder_sticker(dirs: State<Dirs>, id: String, index: usize) -> Result<(), String> {
+    stickers::reorder(&dirs.stickers, &id, index).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn send_sticker(
     app: AppHandle,
     dirs: State<'_, Dirs>,
@@ -321,6 +326,7 @@ pub fn run() {
             import_bytes,
             import_clipboard,
             delete_sticker,
+            reorder_sticker,
             send_sticker,
             dismiss,
             get_settings,
