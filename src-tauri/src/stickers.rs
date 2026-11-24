@@ -63,16 +63,26 @@ pub fn list(dir: &Path) -> Result<Vec<Sticker>> {
 /// Moves a sticker to `index` in the list.
 pub fn reorder(dir: &Path, id: &str, index: usize) -> Result<()> {
     let mut ids: Vec<String> = list(dir)?.into_iter().map(|s| s.id).collect();
+    move_to(&mut ids, id, index)?;
+    write_atomic(&dir.join(ORDER), &serde_json::to_vec(&ids)?)
+}
+
+/// Moves `id` to `index` in `ids`, or to the end when `index` is past it.
+pub fn move_to(ids: &mut Vec<String>, id: &str, index: usize) -> Result<()> {
     let from = ids
         .iter()
         .position(|i| i == id)
         .ok_or_else(|| format!("no sticker {id}"))?;
     let id = ids.remove(from);
     ids.insert(index.min(ids.len()), id);
-    // A crash mid-write must never leave a half file that loses the order.
-    let tmp = dir.join(format!("{ORDER}.tmp"));
-    fs::write(&tmp, serde_json::to_vec(&ids)?)?;
-    fs::rename(&tmp, dir.join(ORDER))?;
+    Ok(())
+}
+
+/// Writes through a temp file, so a crash mid-write never leaves a half file.
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+    let tmp = path.with_extension("tmp");
+    fs::write(&tmp, bytes)?;
+    fs::rename(&tmp, path)?;
     Ok(())
 }
 
@@ -130,7 +140,7 @@ pub fn delete(dir: &Path, cache: &Path, id: &str) -> Result<()> {
     Ok(())
 }
 
-fn next_id() -> u64 {
+pub fn next_id() -> u64 {
     static LAST: AtomicU64 = AtomicU64::new(0);
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)

@@ -4,6 +4,7 @@ mod mac;
 mod popup;
 mod settings;
 mod stickers;
+mod tabs;
 #[cfg(windows)]
 mod win;
 
@@ -57,13 +58,27 @@ fn prerender_all(app: &AppHandle) {
     prerender(app, all.into_iter().map(|s| s.path).collect());
 }
 
-fn save_all(app: &AppHandle, files: Vec<stickers::Result<Vec<u8>>>) -> Result<(), String> {
+/// Saves new stickers, also adding them to `tab` when one is open.
+fn save_all(
+    app: &AppHandle,
+    files: Vec<stickers::Result<Vec<u8>>>,
+    tab: Option<String>,
+) -> Result<(), String> {
     let dir = &app.state::<Dirs>().stickers;
     let (mut saved, mut errors) = (Vec::new(), Vec::new());
-    for bytes in files {
-        match bytes.and_then(|b| stickers::save(dir, &b)) {
+    for file in files {
+        match file.and_then(|f| stickers::save(dir, &f)) {
             Ok(path) => saved.push(path),
             Err(e) => errors.push(e.to_string()),
+        }
+    }
+    if let Some(tab) = tab {
+        let ids: Vec<String> = saved
+            .iter()
+            .filter_map(|p| Some(p.file_stem()?.to_str()?.to_owned()))
+            .collect();
+        if let Err(e) = tabs::tag(dir, &tab, &ids, true) {
+            errors.push(e.to_string());
         }
     }
     prerender(app, saved);
@@ -78,13 +93,19 @@ fn list_stickers(dirs: State<Dirs>) -> Result<Vec<stickers::Sticker>, String> {
     stickers::list(&dirs.stickers).map_err(|e| e.to_string())
 }
 
+/// The optional `tab` header of a raw-body request: the tab to add to.
+fn tab_header(request: &Request) -> Option<String> {
+    let tab = request.headers().get("tab")?.to_str().ok()?;
+    Some(tab.to_owned())
+}
+
 /// Takes the raw bytes of one image file as the request body.
 #[tauri::command]
 async fn import_bytes(app: AppHandle, request: Request<'_>) -> Result<(), String> {
     let InvokeBody::Raw(bytes) = request.body() else {
         return Err("expected raw image bytes".into());
     };
-    save_all(&app, vec![Ok(bytes.clone())])
+    save_all(&app, vec![Ok(bytes.clone())], tab_header(&request))
 }
 
 /// Takes frames the webview decoded as the request body: RGBA pixels, frame
@@ -122,15 +143,23 @@ async fn import_frames(app: AppHandle, request: Request<'_>) -> Result<(), Strin
             ))
         })
         .collect::<Result<_, String>>()?;
-    let path =
-        stickers::save_frames(&app.state::<Dirs>().stickers, frames).map_err(|e| e.to_string())?;
-    prerender(&app, vec![path]);
+    let dir = &app.state::<Dirs>().stickers;
+    let path = stickers::save_frames(dir, frames).map_err(|e| e.to_string())?;
+    prerender(&app, vec![path.clone()]);
+    if let Some(tab) = tab_header(&request) {
+        let id = path.file_stem().unwrap().to_string_lossy().into_owned();
+        tabs::tag(dir, &tab, &[id], true).map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
 #[tauri::command]
-async fn import_clipboard(app: AppHandle) -> Result<(), String> {
-    save_all(&app, clipboard::read_images().map_err(|e| e.to_string())?)
+async fn import_clipboard(app: AppHandle, tab: Option<String>) -> Result<(), String> {
+    save_all(
+        &app,
+        clipboard::read_images().map_err(|e| e.to_string())?,
+        tab,
+    )
 }
 
 #[tauri::command]
@@ -138,9 +167,57 @@ fn delete_sticker(dirs: State<Dirs>, id: String) -> Result<(), String> {
     stickers::delete(&dirs.stickers, &dirs.cache, &id).map_err(|e| e.to_string())
 }
 
+/// Moves a sticker within `tab`, or within the All tab when it's `None`.
 #[tauri::command]
-fn reorder_sticker(dirs: State<Dirs>, id: String, index: usize) -> Result<(), String> {
-    stickers::reorder(&dirs.stickers, &id, index).map_err(|e| e.to_string())
+fn reorder_sticker(
+    dirs: State<Dirs>,
+    tab: Option<String>,
+    id: String,
+    index: usize,
+) -> Result<(), String> {
+    match tab {
+        Some(tab) => tabs::reorder(&dirs.stickers, &tab, &id, index),
+        None => stickers::reorder(&dirs.stickers, &id, index),
+    }
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn list_tabs(dirs: State<Dirs>) -> Vec<tabs::Tab> {
+    tabs::list(&dirs.stickers)
+}
+
+/// Creates a tab when `id` is null, otherwise updates it, and returns its id.
+#[tauri::command]
+fn save_tab(
+    dirs: State<Dirs>,
+    id: Option<String>,
+    name: String,
+    emoji: String,
+) -> Result<String, String> {
+    tabs::save(&dirs.stickers, id.as_deref(), &name, &emoji).map_err(|e| e.to_string())
+}
+
+/// Takes the raw bytes of an image as the request body and makes it the
+/// icon of the tab named by the `tab` header.
+#[tauri::command]
+async fn set_tab_icon(app: AppHandle, request: Request<'_>) -> Result<(), String> {
+    let InvokeBody::Raw(bytes) = request.body() else {
+        return Err("expected raw image bytes".into());
+    };
+    let tab = tab_header(&request).ok_or("missing tab header")?;
+    tabs::set_image(&app.state::<Dirs>().stickers, &tab, bytes).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_tab(dirs: State<Dirs>, id: String) -> Result<(), String> {
+    tabs::delete(&dirs.stickers, &id).map_err(|e| e.to_string())
+}
+
+/// Adds a sticker to a tab, or removes it when `on` is false.
+#[tauri::command]
+fn tag_sticker(dirs: State<Dirs>, tab: String, id: String, on: bool) -> Result<(), String> {
+    tabs::tag(&dirs.stickers, &tab, &[id], on).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -327,6 +404,11 @@ pub fn run() {
             import_clipboard,
             delete_sticker,
             reorder_sticker,
+            list_tabs,
+            save_tab,
+            set_tab_icon,
+            delete_tab,
+            tag_sticker,
             send_sticker,
             dismiss,
             get_settings,

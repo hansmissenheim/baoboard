@@ -8,6 +8,7 @@
     <script type="module" src="/src/main.ts"></script>
   </head>
   <body>
+    <nav id="tabs" role="tablist" aria-label="Tabs"></nav>
     <main id="grid" role="listbox" aria-label="Stickers"></main>
     <section id="settings" hidden>
       <label>
@@ -24,10 +25,27 @@
         <button id="shortcut" type="button"></button>
       </label>
     </section>
+    <form id="editor" hidden>
+      <label>
+        Name
+        <input id="tab-name" required maxlength="40" />
+      </label>
+      <div class="icon-row">
+        <span id="icon-preview" class="tab-icon"></span>
+        <input id="tab-emoji" maxlength="16" placeholder="Emoji" aria-label="Emoji icon" />
+        <button id="upload-icon" type="button">Upload…</button>
+      </div>
+      <div id="emojis" aria-label="Emoji icons"></div>
+      <div class="actions">
+        <button id="cancel-tab" type="button">Cancel</button>
+        <button type="submit">Save</button>
+      </div>
+    </form>
     <footer>
       <span id="status" role="status"></span>
       <button id="gear" type="button" aria-label="Settings">⚙︎</button>
     </footer>
     <input id="picker" type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/bmp,image/avif,video/mp4" multiple hidden />
+    <input id="icon-picker" type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/bmp" hidden />
   </body>
 </html>
